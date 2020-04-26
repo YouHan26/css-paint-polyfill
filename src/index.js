@@ -1,30 +1,4 @@
-/**
- * Copyright 2018 Google Inc. All Rights Reserved.
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *     http://www.apache.org/licenses/LICENSE-2.0
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-import { Realm } from './realm';
 import { defineProperty, fetchText } from './util';
-
-let paintWorklet;
-
-// Use a getter here (if available) to avoid installing
-// our MutationObserver if the API is never used.
-if (!window.CSS) window.CSS = {};
-
-if (!('paintWorklet' in window.CSS)) {
-	defineProperty(window.CSS, 'paintWorklet', {
-		get: () => (paintWorklet || (paintWorklet = new PaintWorklet()))
-	});
-}
 
 const GLOBAL_ID = 'css-paint-polyfill';
 
@@ -430,7 +404,7 @@ function updateElement(element, computedStyle) {
 
 			let actualWidth = equivalentDpr * geom.width,
 				actualHeight = equivalentDpr * geom.height;
-			
+
 			let ctx = element.$$paintContext,
 				cssContextId = `paint-${paintId}-${painterName}`;
 			if (!ctx || !ctx.canvas || ctx.canvas.width!=actualWidth || ctx.canvas.height!=actualHeight) {
@@ -561,7 +535,7 @@ function patchCssText(element) {
 	defineProperty(element.style, 'ownerElement', { value: element });
 }
 
-class PaintWorklet {
+class EsPaintWorklet {
 	constructor() {
 		raf(update);
 
@@ -631,33 +605,29 @@ class PaintWorklet {
 		});
 	}
 
-	addModule(url) {
+	addModule({name: n, painter: pp}) {
 		let p, resolve;
 		if (HAS_PROMISE) {
 			p = new Promise((r) => resolve = r);
 		}
 
-		fetchText(url, code => {
-			let context = {
-				registerPaint(name, Painter) {
-					registerPaint(name, Painter, {
-						context,
-						realm
-					});
-				}
-			};
-			defineProperty(context, 'devicePixelRatio', {
-				get: getDevicePixelRatio
-			});
-			context.self = context;
-			let realm = new Realm(context, root);
+		if (resolve) resolve();
 
-			code = (this.transpile || String)(code);
+		let context = {
+			registerPaint(name, Painter) {
+				registerPaint(name, Painter, {
+					context,
+				});
+			}
+		};
 
-			realm.exec(code);
-			if (resolve) resolve();
+		defineProperty(context, 'devicePixelRatio', {
+			get: getDevicePixelRatio
 		});
-
+		context.self = context;
+		context.registerPaint(n, pp);
 		return p;
 	}
 }
+
+export default new EsPaintWorklet();
