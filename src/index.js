@@ -20,7 +20,6 @@ const USE_CSS_ELEMENT = (testStyles.backgroundImage = `-moz-element(#${GLOBAL_ID
 const HAS_PROMISE = (typeof Promise === 'function');
 testStyles.cssText = '';
 
-let supportsStyleMutations = true;
 let raf = window.requestAnimationFrame || setTimeout;
 let defer = HAS_PROMISE ? Promise.prototype.then.bind(Promise.resolve()) : setTimeout;
 let getDevicePixelRatio = () => window.devicePixelRatio || 1;
@@ -277,7 +276,6 @@ function ensurePaintId(element) {
 	let paintId = element.$$paintId;
 	if (paintId==null) {
 		paintId = element.$$paintId = ++idCounter;
-		patchCssText(element);
 	}
 	return paintId;
 }
@@ -384,12 +382,6 @@ function updateElement(element, computedStyle) {
 
 			let inst;
 			if (painter) {
-				// if (!painter) {
-				// 	element.$$paintPending = true;
-				// 	overridesStylesheet.disabled = false;
-				// 	// setTimeout(maybeUpdateElement, 10, element);
-				// 	return;
-				// }
 				if (painter.Painter.inputProperties) {
 					observedProperties.push.apply(observedProperties, painter.Painter.inputProperties);
 				}
@@ -529,10 +521,16 @@ function applyStyleRule(style, property, value) {
 	style.setProperty(property, value, 'important');
 }
 
-function patchCssText(element) {
-	if (supportsStyleMutations===true) return;
-	if (element.style.ownerElement===element) return;
-	defineProperty(element.style, 'ownerElement', { value: element });
+function recursiveQueueUpdate(node){
+	if (node.nodeType === 1) {
+		if (node.childNodes) {
+			const len = node.childNodes.length;
+			for (let i = len -1; i >=0; i--) {
+				recursiveQueueUpdate(node.childNodes[ i ]);
+			}
+		}
+		queueUpdate(node);
+	}
 }
 
 class EsPaintWorklet {
@@ -542,8 +540,6 @@ class EsPaintWorklet {
 		let a = document.createElement('x-a');
 		document.body.appendChild(a);
 
-		let supportsStyleMutations = false;
-
 		let lock = false;
 		new MutationObserver(records => {
 			if (lock===true) return;
@@ -552,16 +548,11 @@ class EsPaintWorklet {
 				let record = records[i], added;
 				if (record.type === 'childList' && (added = record.addedNodes)) {
 					for (let j = 0; j < added.length; j++) {
-						if (added[j].nodeType === 1) {
-							queueUpdate(added[j]);
-						}
+						recursiveQueueUpdate(added[j]);
 					}
 				}
 				else if (record.type==='attributes' && record.target.nodeType === 1) {
-					if (record.target === a) {
-						supportsStyleMutations = true;
-					}
-					else {
+					if (record.target !== a) {
 						walk(record.target, queueUpdate);
 					}
 				}
@@ -576,32 +567,6 @@ class EsPaintWorklet {
 		a.style.cssText = 'color: red;';
 		setTimeout( () => {
 			document.body.removeChild(a);
-			if (!supportsStyleMutations) {
-				let styleDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'style');
-				const oldStyleGetter = styleDesc.get;
-				styleDesc.get = function() {
-					const style = oldStyleGetter.call(this);
-					style.ownerElement = this;
-					return style;
-				};
-				defineProperty(HTMLElement.prototype, 'style', styleDesc);
-
-				let cssTextDesc = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'cssText');
-				let oldSet = cssTextDesc.set;
-				cssTextDesc.set = function (value) {
-					if (this.ownerElement) queueUpdate(this.ownerElement);
-					return oldSet.call(this, value);
-				};
-				defineProperty(CSSStyleDeclaration.prototype, 'cssText', cssTextDesc);
-
-				let setPropertyDesc = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'setProperty');
-				let oldSetProperty = setPropertyDesc.value;
-				setPropertyDesc.value = function (name, value, priority) {
-					if (this.ownerElement) queueUpdate(this.ownerElement);
-					oldSetProperty.call(this, name, value, priority);
-				};
-				defineProperty(CSSStyleDeclaration.prototype, 'setProperty', setPropertyDesc);
-			}
 		});
 	}
 
